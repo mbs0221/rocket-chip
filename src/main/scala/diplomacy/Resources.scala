@@ -437,6 +437,10 @@ object ResourceAnchors
     }
   }
 
+  val chosen = new DeviceSnippet {
+    def describe() = Description("chosen", Map())
+  }
+
   val cpus = new Device {
     def describe(resources: ResourceBindings): Description = {
       val width = resources("width").map(_.value)
