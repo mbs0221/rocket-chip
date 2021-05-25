@@ -11,12 +11,12 @@ import freechips.rocketchip.util._
 import freechips.rocketchip.util.property._
 
 class PMPConfig extends Bundle {
-  val l = Bool()
-  val res = UInt(2.W)
-  val a = UInt(2.W)
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
+  val l = Bool()         // Lock
+  val res = UInt(2.W)    // Reserved
+  val a = UInt(2.W)      // Available
+  val x = Bool()         // eXecute
+  val w = Bool()         // Write
+  val r = Bool()         // Read
 }
 
 object PMP {
@@ -36,8 +36,8 @@ class PMPReg(implicit p: Parameters) extends CoreBundle()(p) {
   val addr = UInt((paddrBits - PMP.lgAlign).W)
 
   def reset(): Unit = {
-    cfg.a := 0
-    cfg.l := 0
+    cfg.a := 0 // not available
+    cfg.l := 0 // not locked
   }
 
   def readAddr = if (pmpGranularity.log2 == PMP.lgAlign) addr else {

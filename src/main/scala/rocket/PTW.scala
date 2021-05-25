@@ -58,16 +58,16 @@ class DatapathPTWIO(implicit p: Parameters) extends CoreBundle()(p)
 }
 
 class PTE(implicit p: Parameters) extends CoreBundle()(p) {
-  val ppn = UInt(width = 54)
-  val reserved_for_software = Bits(width = 2)
-  val d = Bool()
-  val a = Bool()
-  val g = Bool()
-  val u = Bool()
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
-  val v = Bool()
+  val ppn = UInt(width = 54)  // Physical Page Number
+  val reserved_for_software = Bits(width = 2)  // Reserved for OS
+  val d = Bool()  // Dirty
+  val a = Bool()  // Accessed
+  val g = Bool()  // Global for OS
+  val u = Bool()  // User
+  val x = Bool()  // eXecute
+  val w = Bool()  // Write
+  val r = Bool()  // Read
+  val v = Bool()  // Valid
 
   def table(dummy: Int = 0) = v && !r && !w && !x
   def leaf(dummy: Int = 0) = v && (r || (x && !w)) && a
@@ -81,16 +81,16 @@ class PTE(implicit p: Parameters) extends CoreBundle()(p) {
 
 class L2TLBEntry(nSets: Int)(implicit p: Parameters) extends CoreBundle()(p)
     with HasCoreParameters {
-  val idxBits = log2Ceil(nSets)
-  val tagBits = vpnBits - idxBits
-  val tag = UInt(width = tagBits)
-  val ppn = UInt(width = ppnBits)
-  val d = Bool()
-  val a = Bool()
-  val u = Bool()
-  val x = Bool()
-  val w = Bool()
-  val r = Bool()
+  val idxBits = log2Ceil(nSets)    // number of index bits
+  val tagBits = vpnBits - idxBits  // number of tag bits
+  val tag = UInt(width = tagBits)  // Page Tag
+  val ppn = UInt(width = ppnBits)  // Physical Page Number
+  val d = Bool()  // Dirty
+  val a = Bool()  // Accessed
+  val u = Bool()  // User
+  val x = Bool()  // eXecute
+  val w = Bool()  // Write
+  val r = Bool()  // Read
 
   override def cloneType = new L2TLBEntry(nSets).asInstanceOf[this.type]
 }
