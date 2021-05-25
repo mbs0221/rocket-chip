@@ -618,7 +618,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     // the control signals in WB stage is inherited from MEM stage
     wb_ctrl := mem_ctrl
     wb_reg_sfence := mem_reg_sfence
-    // the data to be writen
+    // the data to be writen back into register
     wb_reg_wdata := Mux(mem_scie_pipelined, mem_scie_pipelined_wdata,
       Mux(!mem_reg_xcpt && mem_ctrl.fp && mem_ctrl.wxd, io.fpu.toint_data, mem_int_wdata))
     when (mem_ctrl.rocc || mem_reg_sfence) {
@@ -665,12 +665,14 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   take_pc_wb := replay_wb || wb_xcpt || csr.io.eret || wb_reg_flush_pipe
 
   // writeback arbitration
+  // D-Cache resp.
   val dmem_resp_xpu = !io.dmem.resp.bits.tag(0).asBool
   val dmem_resp_fpu =  io.dmem.resp.bits.tag(0).asBool
   val dmem_resp_waddr = io.dmem.resp.bits.tag(5, 1)
   val dmem_resp_valid = io.dmem.resp.valid && io.dmem.resp.bits.has_data
   val dmem_resp_replay = dmem_resp_valid && io.dmem.resp.bits.replay
 
+  // l1-{data, addr} from MulDiv resp.
   div.io.resp.ready := !wb_wxd
   val ll_wdata = Wire(init = div.io.resp.bits.data)
   val ll_waddr = Wire(init = div.io.resp.bits.tag)
@@ -678,12 +680,14 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   if (usingRoCC) {
     io.rocc.resp.ready := !wb_wxd
     when (io.rocc.resp.fire()) {
+      // l1-{data, addr} from RoCC resp.
       div.io.resp.ready := Bool(false)
       ll_wdata := io.rocc.resp.bits.data
       ll_waddr := io.rocc.resp.bits.rd
       ll_wen := Bool(true)
     }
   }
+  // l1-addr from D-Cache resp.
   when (dmem_resp_replay && dmem_resp_xpu) {
     div.io.resp.ready := Bool(false)
     if (usingRoCC)
@@ -695,7 +699,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
   val rf_wen = wb_wen || ll_wen
+  // the addr comes from MulDiv, RoCC or D-Cache when l1_when==true else from wb_waddr
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
+  // the data comes from D-Cache, l1_wdata, CSR, Mul, or wb_reg_wdata
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
@@ -739,7 +745,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     iobpw.action := bp.control.action
   }
 
-  // Hazard Detection
+  /** Hazard Detection
+    * ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
+    * ID.wxd && ID.rd =/= 0 && ID.rd == {EX, MEM, WB}.rd
+    */
   val hazard_targets = Seq((id_ctrl.rxs1 && id_raddr1 =/= UInt(0), id_raddr1),
                            (id_ctrl.rxs2 && id_raddr2 =/= UInt(0), id_raddr2),
                            (id_ctrl.wxd  && id_waddr  =/= UInt(0), id_waddr))
@@ -797,6 +806,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val rocc_blocked = Reg(Bool())
   rocc_blocked := !wb_xcpt && !io.rocc.cmd.ready && (io.rocc.cmd.valid || rocc_blocked)
 
+  // stall decode control signal
   val ctrl_stalld =
     id_ex_hazard || id_mem_hazard || id_wb_hazard || id_sboard_hazard ||
     csr.io.singleStep && (ex_reg_valid || mem_reg_valid || wb_reg_valid) ||
@@ -810,6 +820,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     csr.io.csr_stall ||
     id_reg_pause ||
     io.traceStall
+  
+  // kill decode control signal 
   ctrl_killd := !ibuf.io.inst(0).valid || ibuf.io.inst(0).bits.replay || take_pc_mem_wb || ctrl_stalld || csr.io.interrupt
 
   // I-Cache Request
@@ -824,6 +836,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     imem_might_request_reg := ex_pc_valid || mem_pc_valid || io.ptw.customCSRs.disableICacheClockGate
     imem_might_request_reg
   }
+  // store fence
   io.imem.sfence.valid := wb_reg_valid && wb_reg_sfence
   io.imem.sfence.bits.rs1 := wb_reg_mem_size(0)
   io.imem.sfence.bits.rs2 := wb_reg_mem_size(1)
