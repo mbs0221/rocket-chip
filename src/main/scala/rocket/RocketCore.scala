@@ -263,7 +263,16 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   require(decodeWidth == 1 /* TODO */ && retireWidth == decodeWidth)
   require(!(coreParams.useRVE && coreParams.fpu.nonEmpty), "Can't select both RVE and floating-point")
   val id_ctrl = Wire(new IntCtrlSigs()).decode(id_inst(0), decode_table)
-  // Register File
+  
+  /** Register File
+    *  There are 16/32 registers. The regAddrMask has pattern 0xf or 0x1f.
+    *  The register address is less than 16 or 32.
+    *  id_ren: register enable signal.
+    *  id_raddr: register address in ID stage.
+    *  rf: register file.
+    *  id_rs: source register in ID stage.
+    *  id_npc: the next pc in ID stage
+    */
   val lgNXRegs = if (coreParams.useRVE) 4 else 5
   val regAddrMask = (1 << lgNXRegs) - 1
 
@@ -282,7 +291,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val ctrl_killd = Wire(Bool())
   val id_npc = (ibuf.io.pc.asSInt + ImmGen(IMM_UJ, id_inst(0))).asUInt
 
-  // Control & Status Register
+  /** Control & Status Register
+    *  The id_csr_en signal is enabled when id_ctrl.csr is one of {S, C, W}.
+    *  The id_system_insn is true when using uimm[4:0] field.
+    *  The id_csr_ren is enabled for both CSRRS and CSRRC, if rs1 === 0, then the instruction will not write to the CSR at all.
+    *  The id_sfence is used when it is M_FENCE memory operation.
+    */ 
   val csr = Module(new CSRFile(perfEvents, coreParams.customCSRs.decls))
   val id_csr_en = id_ctrl.csr.isOneOf(CSR.S, CSR.C, CSR.W)
   val id_system_insn = id_ctrl.csr === CSR.I
@@ -298,6 +312,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     d.io.insn := id_raw_inst(0)
     d.io
   }
+
   // Illegal Instruction
   val id_illegal_insn = !id_ctrl.legal ||
     (id_ctrl.mul || id_ctrl.div) && !csr.io.status.isa('m'-'a') ||
@@ -312,9 +327,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     id_ctrl.scie && !(id_scie_decoder.unpipelined || id_scie_decoder.pipelined) ||
     id_csr_en && (csr.io.decode(0).read_illegal || !id_csr_ren && csr.io.decode(0).write_illegal) ||
     !ibuf.io.inst(0).bits.rvc && ((id_sfence || id_system_insn) && csr.io.decode(0).system_illegal)
+
   // stall decode for fences (now, for AMO.rl; later, for AMO.aq and FENCE)
-  val id_amo_aq = id_inst(0)(26)
-  val id_amo_rl = id_inst(0)(25)
+  val id_amo_aq = id_inst(0)(26)  // acquire
+  val id_amo_rl = id_inst(0)(25)  // release
   val id_fence_pred = id_inst(0)(27,24)
   val id_fence_succ = id_inst(0)(23,20)
   val id_fence_next = id_ctrl.fence || id_ctrl.amo && id_amo_aq
@@ -438,6 +454,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   ex_reg_xcpt_interrupt := !take_pc && ibuf.io.inst(0).valid && csr.io.interrupt
 
   when (!ctrl_killd) {
+    // the control signal is inherited from ID to EX stage
     ex_ctrl := id_ctrl
     ex_reg_rvc := ibuf.io.inst(0).bits.rvc
     ex_ctrl.csr := id_csr
@@ -475,7 +492,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
     // bypass logic of EX stage
     for (i <- 0 until id_raddr.size) {
+      // whether the register can has bypass
       val do_bypass = id_bypass_src(i).reduce(_||_)
+      // which value will be used in bypass
       val bypass_src = PriorityEncoder(id_bypass_src(i))
       ex_reg_rs_bypass(i) := do_bypass
       ex_reg_rs_lsb(i) := bypass_src
@@ -672,7 +691,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val dmem_resp_valid = io.dmem.resp.valid && io.dmem.resp.bits.has_data
   val dmem_resp_replay = dmem_resp_valid && io.dmem.resp.bits.replay
 
-  // l1-{data, addr} from MulDiv resp.
+  // The ll_wdata comes from long latency div/dmem/rocc instructions.
   div.io.resp.ready := !wb_wxd
   val ll_wdata = Wire(init = div.io.resp.bits.data)
   val ll_waddr = Wire(init = div.io.resp.bits.tag)
@@ -680,14 +699,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   if (usingRoCC) {
     io.rocc.resp.ready := !wb_wxd
     when (io.rocc.resp.fire()) {
-      // l1-{data, addr} from RoCC resp.
       div.io.resp.ready := Bool(false)
       ll_wdata := io.rocc.resp.bits.data
       ll_waddr := io.rocc.resp.bits.rd
       ll_wen := Bool(true)
     }
   }
-  // l1-addr from D-Cache resp.
   when (dmem_resp_replay && dmem_resp_xpu) {
     div.io.resp.ready := Bool(false)
     if (usingRoCC)
@@ -696,12 +713,11 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     ll_wen := Bool(true)
   }
 
+  // The data comes from dmem/ll_wdata/csr/mul/wb_reg_wdata.
   val wb_valid = wb_reg_valid && !replay_wb && !wb_xcpt
   val wb_wen = wb_valid && wb_ctrl.wxd
   val rf_wen = wb_wen || ll_wen
-  // the addr comes from MulDiv, RoCC or D-Cache when l1_when==true else from wb_waddr
   val rf_waddr = Mux(ll_wen, ll_waddr, wb_waddr)
-  // the data comes from D-Cache, l1_wdata, CSR, Mul, or wb_reg_wdata
   val rf_wdata = Mux(dmem_resp_valid && dmem_resp_xpu, io.dmem.resp.bits.data(xLen-1, 0),
                  Mux(ll_wen, ll_wdata,
                  Mux(wb_ctrl.csr =/= CSR.N, csr.io.rw.rdata,
@@ -746,8 +762,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   }
 
   /** Hazard Detection
-    * ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
-    * ID.wxd && ID.rd =/= 0 && ID.rd == {EX, MEM, WB}.rd
+    * - ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
+    * - ID.wxd && ID.rd =/= 0 && ID.rd == {EX, MEM, WB}.rd
     */
   val hazard_targets = Seq((id_ctrl.rxs1 && id_raddr1 =/= UInt(0), id_raddr1),
                            (id_ctrl.rxs2 && id_raddr2 =/= UInt(0), id_raddr2),
@@ -765,6 +781,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     else div.io.resp.fire() && div.io.resp.bits.tag === r || dmem_resp_replay && dmem_resp_xpu && dmem_resp_waddr === r
   }
   val id_sboard_hazard = checkHazards(hazard_targets, rd => sboard.read(rd) && !id_sboard_clear_bypass(rd))
+  // The sboard is updated when the inst. is div/cache miss/rocc and the writeback is enabled.
   sboard.set(wb_set_sboard && wb_wen, wb_waddr)
 
   // stall for RAW/WAW hazards on CSRs, loads, AMOs, and mul/div in execute stage.

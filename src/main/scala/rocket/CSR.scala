@@ -37,14 +37,14 @@ class MStatus extends Bundle {
   val mprv = Bool()
   val xs = UInt(width = 2)
   val fs = UInt(width = 2)
-  val mpp = UInt(width = 2)   // previous previledge
+  val mpp = UInt(width = 2)
   val vs = UInt(width = 2)
-  val spp = UInt(width = 1)   // previous previledge
-  val mpie = Bool()           // previous interrupt enable
+  val spp = UInt(width = 1)
+  val mpie = Bool()
   val hpie = Bool()
   val spie = Bool()
   val upie = Bool()
-  val mie = Bool()            // interrupt enable
+  val mie = Bool()
   val hie = Bool()
   val sie = Bool()
   val uie = Bool()
@@ -74,15 +74,15 @@ class MIP(implicit p: Parameters) extends CoreBundle()(p)
   val debug = Bool() // keep in sync with CSR.debugIntCause
   val zero1 = Bool()
   val rocc = Bool()
-  val meip = Bool() // eip: external interrupt pending
+  val meip = Bool()
   val heip = Bool()
   val seip = Bool()
   val ueip = Bool()
-  val mtip = Bool() // tip: timer interrupt pending
+  val mtip = Bool()
   val htip = Bool()
   val stip = Bool()
   val utip = Bool()
-  val msip = Bool() // sip: software interrupt pending
+  val msip = Bool()
   val hsip = Bool()
   val ssip = Bool()
   val usip = Bool()
@@ -337,17 +337,14 @@ class CSRFile(
 
   val (supported_interrupts, delegable_interrupts) = {
     val sup = Wire(new MIP)
-    // supported software interrupt pending
     sup.usip := false
     sup.ssip := Bool(usingSupervisor)
     sup.hsip := false
     sup.msip := true
-    // supported timer interrupt pending
     sup.utip := false
     sup.stip := Bool(usingSupervisor)
     sup.htip := false
     sup.mtip := true
-    // supported external interrupt pending
     sup.ueip := false
     sup.seip := Bool(usingSupervisor)
     sup.heip := false
@@ -358,7 +355,6 @@ class CSRFile(
     sup.zero2 := false
     sup.lip foreach { _ := true }
     val supported_high_interrupts = if (io.interrupts.buserror.nonEmpty && !usingNMI) UInt(BigInt(1) << CSR.busErrorIntCause) else 0.U
-    // delegable machine interrupt pending
     val del = Wire(init=sup)
     del.msip := false
     del.mtip := false
@@ -377,7 +373,7 @@ class CSRFile(
     Causes.illegal_instruction,
     Causes.user_ecall).map(1 << _).sum)
 
-  // Debug-mode CSR: d-{debug, pc, scratch, scratch1}, singleSteped
+  // Debug-mode CSR
   val reg_debug = Reg(init=Bool(false))
   val reg_dpc = Reg(UInt(width = vaddrBitsExtended))
   val reg_dscratch = Reg(UInt(width = xLen))
@@ -391,7 +387,7 @@ class CSRFile(
   val reg_bp = Reg(Vec(1 << log2Up(nBreakpoints), new BP))
   val reg_pmp = Reg(Vec(nPMPs, new PMPReg))
 
-  // M-mode exception handling CSR: m-{ie, ideleg, edeleg, ip, epc, cause, tval, scratch, tvec} 
+  // M-mode exception handling CSR
   val reg_mie = Reg(UInt(width = xLen))
   val (reg_mideleg, read_mideleg) = {
     val reg = Reg(UInt(xLen.W))
@@ -412,7 +408,7 @@ class CSRFile(
     case None => Reg(UInt(width = mtvecWidth))
   }
 
-  // M-mode non-masked exception handling CSR: mn-{scratch, epc, cause, status}, {r,u}-nmie
+  // M-mode non-masked exception handling CSR
   val reset_mnstatus = Wire(init=new MStatus().fromBits(0))
   reset_mnstatus.mpp := PRV.M
   val reg_mnscratch = Reg(Bits(width = xLen))
@@ -433,7 +429,7 @@ class CSRFile(
     (reg, Mux(usingSupervisor, reg & delegable_counters, 0.U))
   }
 
-  // S-mode exception handling CSR: s-{epc, cause, tval, scratch, tvec}, satp, wfi
+  // S-mode exception handling CSR
   val reg_sepc = Reg(UInt(width = vaddrBitsExtended))
   val reg_scause = Reg(Bits(width = xLen))
   val reg_stval = Reg(UInt(width = vaddrBitsExtended))
@@ -442,8 +438,11 @@ class CSRFile(
   val reg_satp = Reg(new PTBR)
   val reg_wfi = withClock(io.ungated_clock) { Reg(init=Bool(false)) }
 
+  // User Floating-Point CSRs
   val reg_fflags = Reg(UInt(width = 5))
   val reg_frm = Reg(UInt(width = 3))
+
+  // Vector extension
   val reg_vconfig = usingVector.option(Reg(new VConfig))
   val reg_vstart = usingVector.option(Reg(UInt(maxVLMax.log2.W)))
   val reg_vxsat = usingVector.option(Reg(Bool()))
