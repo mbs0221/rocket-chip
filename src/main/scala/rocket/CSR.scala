@@ -710,7 +710,7 @@ class CSRFile(
       is_sfence && !allow_sfence_vma
   }
 
-  // caculate trap vector
+  // Trap Causes
   val cause =
     Mux(insn_call, reg_mstatus.prv + Causes.user_ecall,
     Mux[UInt](insn_break, Causes.breakpoint, io.cause))
@@ -766,10 +766,12 @@ class CSRFile(
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1, "these conditions must be mutually exclusive")
 
+  // WFI status
   when (insn_wfi && !io.singleStep && !reg_debug) { reg_wfi := true }
   when (pending_interrupts.orR || io.interrupts.debug || exception) { reg_wfi := false }
   io.interrupts.nmi.map(nmi => when (nmi.unmi || nmi.rnmi) { reg_wfi := false } )
 
+  // singleStep debugging
   when (io.retire(0) || exception) { reg_singleStepped := true }
   when (!io.singleStep) { reg_singleStepped := false }
   assert(!io.singleStep || io.retire <= UInt(1))
@@ -843,24 +845,29 @@ class CSRFile(
     }
   }
 
+  // MRET/DRET/MNRET/SRET
   when (insn_ret) {
     val ret_prv = WireInit(UInt(), DontCare)
     when (Bool(usingSupervisor) && !io.rw.addr(9)) {
+      // SRET
       reg_mstatus.sie := reg_mstatus.spie
       reg_mstatus.spie := true
       reg_mstatus.spp := PRV.U
       ret_prv := reg_mstatus.spp
       io.evec := readEPC(reg_sepc)
     }.elsewhen (Bool(usingDebug) && io.rw.addr(10) && io.rw.addr(7)) {
+      // DRET
       ret_prv := reg_dcsr.prv
       reg_debug := false
       io.evec := readEPC(reg_dpc)
     }.elsewhen (Bool(usingNMI) && io.rw.addr(10) && !io.rw.addr(7)) {
+      // MNRET
       ret_prv := reg_mnstatus.mpp
       reg_rnmie := true.B
       reg_unmie := true.B
       io.evec := readEPC(reg_mnepc)
     }.otherwise {
+      // MRET
       reg_mstatus.mie := reg_mstatus.mpie
       reg_mstatus.mpie := true
       reg_mstatus.mpp := legalizePrivilege(PRV.U)
@@ -868,6 +875,7 @@ class CSRFile(
       io.evec := readEPC(reg_mepc)
     }
 
+    // reset to previous previledge
     new_prv := ret_prv
     when (usingUser && ret_prv < PRV.M) {
       reg_mstatus.mprv := false
@@ -928,7 +936,7 @@ class CSRFile(
     }
   }
 
-  // CSR.WriteEnabled
+  // Write CSR
   val csr_wen = io.rw.cmd.isOneOf(CSR.S, CSR.C, CSR.W)
   io.csrw_counter := Mux(coreParams.haveBasicCounters && csr_wen && (io.rw.addr.inRange(CSRs.mcycle, CSRs.mcycle + CSR.nCtr) || io.rw.addr.inRange(CSRs.mcycleh, CSRs.mcycleh + CSR.nCtr)), UIntToOH(io.rw.addr(log2Ceil(CSR.nCtr+nPerfCounters)-1, 0)), 0.U)
   when (csr_wen) {
@@ -1137,6 +1145,7 @@ class CSRFile(
     }
   }
 
+  // V-Extension
   io.vector.map { vio =>
     when (vio.set_vconfig.valid) {
       // user of CSRFile is responsible for set_vs_dirty in this case
@@ -1158,12 +1167,14 @@ class CSRFile(
     }
   }
 
+  // VM Support
   reg_satp.asid := 0
   if (!usingVM) {
     reg_satp.mode := 0
     reg_satp.ppn := 0
   }
 
+  // Breakpoint debugging
   if (nBreakpoints <= 1) reg_tselect := 0
   for (bpc <- reg_bp map {_.control}) {
     bpc.ttype := bpc.tType

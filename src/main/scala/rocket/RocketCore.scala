@@ -249,6 +249,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val take_pc_wb = Wire(Bool())
   val wb_reg_wphit           = Reg(Vec(nBreakpoints, Bool()))
 
+  // The `take_pc` leads to two results: one is enable the imem.req, another is kill the ibuf.
+  // That's comprehensive If there is a jump, we need to read the new instructions and abandon the instruction buffer.
+  // Now, `take_pc` means `take_pc_mem` or `take_pc_wb`.
   val take_pc_mem_wb = take_pc_wb || take_pc_mem
   val take_pc = take_pc_mem_wb
 
@@ -454,7 +457,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   ex_reg_xcpt_interrupt := !take_pc && ibuf.io.inst(0).valid && csr.io.interrupt
 
   when (!ctrl_killd) {
-    // the control signal is inherited from ID to EX stage
+    // the control signal is inherited from ID stage
     ex_ctrl := id_ctrl
     ex_reg_rvc := ibuf.io.inst(0).bits.rvc
     ex_ctrl.csr := id_csr
@@ -570,6 +573,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   when (mem_reg_valid && mem_reg_flush_pipe) {
     mem_reg_sfence := false
   }.elsewhen (ex_pc_valid) {
+    // The following control signal is inherited from EX stage
     mem_ctrl := ex_ctrl
     mem_scie_unpipelined := ex_scie_unpipelined
     mem_scie_pipelined := ex_scie_pipelined
@@ -590,6 +594,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     mem_reg_wdata := Mux(ex_scie_unpipelined, ex_scie_unpipelined_wdata, alu.io.out)
     mem_br_taken := alu.io.cmp_out
 
+    // The data to be stored in dmem.
     when (ex_ctrl.rxs2 && (ex_ctrl.mem || ex_ctrl.rocc || ex_sfence)) {
       val size = Mux(ex_ctrl.rocc, log2Ceil(xLen/8).U, ex_reg_mem_size)
       mem_reg_rs2 := new StoreGen(size, 0.U, ex_rs(1), coreDataBytes).data
@@ -677,10 +682,12 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // control signals in WB stage
   val wb_pc_valid = wb_reg_valid || wb_reg_replay || wb_reg_xcpt
   val wb_wxd = wb_reg_valid && wb_ctrl.wxd
+  // The sboard is updated when the inst. is div/cache miss/rocc and the writeback is enabled.
   val wb_set_sboard = wb_ctrl.div || wb_dcache_miss || wb_ctrl.rocc
   val replay_wb_common = io.dmem.s2_nack || wb_reg_replay
   val replay_wb_rocc = wb_reg_valid && wb_ctrl.rocc && !io.rocc.cmd.ready
   val replay_wb = replay_wb_common || replay_wb_rocc
+  // The `take_pc_wb` comes from 1) replay 2) exceptions 3) eret 4) flush pipe
   take_pc_wb := replay_wb || wb_xcpt || csr.io.eret || wb_reg_flush_pipe
 
   // writeback arbitration
@@ -773,6 +780,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
                               (io.fpu.dec.ren3, id_raddr3),
                               (io.fpu.dec.wen, id_waddr))
 
+  // When the register is not busy in the next cycle, there be no bypass. 
+  // The `id_sboard_hazard` will lead to `ctrl_stalld`, and the pipeline will stall.
   val sboard = new Scoreboard(32, true)
   sboard.clear(ll_wen, ll_waddr)
   def id_sboard_clear_bypass(r: UInt) = {
@@ -781,7 +790,6 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     else div.io.resp.fire() && div.io.resp.bits.tag === r || dmem_resp_replay && dmem_resp_xpu && dmem_resp_waddr === r
   }
   val id_sboard_hazard = checkHazards(hazard_targets, rd => sboard.read(rd) && !id_sboard_clear_bypass(rd))
-  // The sboard is updated when the inst. is div/cache miss/rocc and the writeback is enabled.
   sboard.set(wb_set_sboard && wb_wen, wb_waddr)
 
   // stall for RAW/WAW hazards on CSRs, loads, AMOs, and mul/div in execute stage.
