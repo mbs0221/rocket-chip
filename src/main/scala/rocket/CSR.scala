@@ -541,12 +541,12 @@ class CSRFile(
     CSRs.mncause -> reg_mncause,
     CSRs.mnstatus -> read_mnstatus.asUInt)
 
-  // CSRs for Context
+  // CSR for Context
   val context_csrs = LinkedHashMap[Int,Bits]() ++
     reg_mcontext.map(r => CSRs.mcontext -> r) ++
     reg_scontext.map(r => CSRs.scontext -> r)
 
-  // CSRs for FPU
+  // CSR for FPU
   val read_fcsr = Cat(reg_frm, reg_fflags)
   val fp_csrs = LinkedHashMap[Int,Bits]() ++
     usingFPU.option(CSRs.fflags -> reg_fflags) ++
@@ -603,7 +603,7 @@ class CSRFile(
     }
   }
 
-  // CSRs for supervisor
+  // CSR for supervisor
   if (usingSupervisor) {
     val read_sie = reg_mie & read_mideleg
     val read_sip = read_mip & read_mideleg
@@ -715,6 +715,8 @@ class CSRFile(
     Mux(insn_call, reg_mstatus.prv + Causes.user_ecall,
     Mux[UInt](insn_break, Causes.breakpoint, io.cause))
   val cause_lsbs = cause(log2Ceil(1 + CSR.busErrorIntCause)-1, 0)
+
+  // Debug Trap Vector
   val causeIsDebugInt = cause(xLen-1) && cause_lsbs === CSR.debugIntCause
   val causeIsDebugTrigger = !cause(xLen-1) && cause_lsbs === CSR.debugTriggerCause
   val causeIsDebugBreak = !cause(xLen-1) && insn_break && Cat(reg_dcsr.ebreakm, reg_dcsr.ebreakh, reg_dcsr.ebreaks, reg_dcsr.ebreaku)(reg_mstatus.prv)
@@ -722,6 +724,8 @@ class CSRFile(
   val debugEntry = p(DebugModuleKey).map(_.debugEntry).getOrElse(BigInt(0x800))
   val debugException = p(DebugModuleKey).map(_.debugException).getOrElse(BigInt(0x808))
   val debugTVec = Mux(reg_debug, Mux(insn_break, debugEntry.U, debugException.U), debugEntry.U)
+  
+  // Non-Debug Trap Vector
   val delegate = Bool(usingSupervisor) && reg_mstatus.prv <= PRV.S && Mux(cause(xLen-1), read_mideleg(cause_lsbs), read_medeleg(cause_lsbs))
   def mtvecBaseAlign = 2
   def mtvecInterruptAlign = {
@@ -736,6 +740,7 @@ class CSRFile(
     Mux(doVector, interruptVec, base >> mtvecBaseAlign << mtvecBaseAlign)
   }
 
+  // NMI Trap Vector
   val causeIsUnmiInt = cause(xLen-1) && cause(xLen-2) && cause_lsbs === CSR.unmiIntCause
   val causeIsRnmiInt = cause(xLen-1) && cause(xLen-2) && (cause_lsbs === CSR.rnmiIntCause || cause_lsbs === CSR.rnmiBEUCause)
   val causeIsRnmiBEU = cause(xLen-1) && cause(xLen-2) && cause_lsbs === CSR.rnmiBEUCause
@@ -763,6 +768,7 @@ class CSRFile(
   if (xLen == 32)
     io.status.sd_rv32 := io.status.sd
 
+  // three kinds of exception
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1, "these conditions must be mutually exclusive")
 
@@ -936,7 +942,7 @@ class CSRFile(
     }
   }
 
-  // Write CSR
+  // CSR Write
   val csr_wen = io.rw.cmd.isOneOf(CSR.S, CSR.C, CSR.W)
   io.csrw_counter := Mux(coreParams.haveBasicCounters && csr_wen && (io.rw.addr.inRange(CSRs.mcycle, CSRs.mcycle + CSR.nCtr) || io.rw.addr.inRange(CSRs.mcycleh, CSRs.mcycleh + CSR.nCtr)), UIntToOH(io.rw.addr(log2Ceil(CSR.nCtr+nPerfCounters)-1, 0)), 0.U)
   when (csr_wen) {
