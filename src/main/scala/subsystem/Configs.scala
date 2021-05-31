@@ -84,6 +84,13 @@ class WithCoherentBusTopology extends Config((site, here, up) => {
       driveMBusClockFromSBus = site(DriveClocksFromSBus)))
 })
 
+/**
+  * To use your core in a Chipyard config, you will need a config fragment that will create a
+  *  TileParams object of your core in the current config.
+  *
+  * @param n
+  * @param overrideIdOffset
+  */
 class WithNBigCores(n: Int, overrideIdOffset: Option[Int] = None) extends Config((site, here, up) => {
   case RocketTilesKey => {
     val prev = up(RocketTilesKey, site)

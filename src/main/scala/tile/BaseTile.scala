@@ -356,4 +356,16 @@ abstract class BaseTile private (val crossing: ClockCrossingType, q: Parameters)
   this.suggestName(tileParams.name)
 }
 
+/**
+  * The implementation class contains the parameterized, actual hardware that depends on the values
+  *  resolved by the Diplomacy framework according to the info provided in the Tile class. This class
+  *  will normally contains Chisel RTL code. If your core is in Verilog, you will need to instantiate
+  *  the black box class that wraps your Verilog implementation and connect it with the buses and
+  *  other components. No Diplomacy/TileLink code should be in this class; you should only connect
+  *  the IO signals in TileLink interfaces or other diplomatically defined components, which are
+  *  located in the tile class.
+  *
+  * @param outer
+  */
+
 abstract class BaseTileModuleImp[+L <: BaseTile](val outer: L) extends LazyModuleImp(outer) with HasTileParameters

@@ -30,10 +30,12 @@ class TileInterrupts(implicit p: Parameters) extends CoreBundle()(p) {
 }
 
 /**
- * All tile classes implement BaseTile and will normally implement `SinksExternalInterrupts` 
- * and `SourcesExternalNotifications`, which allow the tile to accept external interrupt. 
- */
-
+  * Chipyard allows a tile to either receive interrupts from other devices or initiate interrupts to notify
+  *  other cores/devices. In the tile that inherited `SinksExternalInterrupts`, one can create a
+  *  `TileInterrupts` object (a Chisel bundle) and call `decodeCoreInterrupts()` with the object as the
+  *  argument. Note that you should call this function in the implementation class since it returns a Chisel
+  *  bundle used by RTL code. You can then read the interrupt bits from the `TileInterrupts` bundle we create above.
+  */
 // Use diplomatic interrupts to external interrupts from the subsystem into the tile
 trait SinksExternalInterrupts { this: BaseTile =>
 
