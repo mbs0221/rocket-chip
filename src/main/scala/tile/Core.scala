@@ -64,6 +64,7 @@ trait CoreParams {
   def vMemDataBits: Int = 0
 }
 
+// Mixin core level parameters
 trait HasCoreParameters extends HasTileParameters {
   val coreParams: CoreParams = tileParams.core
 
@@ -125,9 +126,11 @@ trait HasCoreParameters extends HasTileParameters {
 
 }
 
+// Abstract class of the core components
 abstract class CoreModule(implicit val p: Parameters) extends Module
   with HasCoreParameters
 
+// Define the io port of the core components
 abstract class CoreBundle(implicit val p: Parameters) extends ParameterizedBundle()(p)
   with HasCoreParameters
 
@@ -135,6 +138,7 @@ class CoreInterrupts(implicit p: Parameters) extends TileInterrupts()(p) {
   val buserror = tileParams.beuAddr.map(a => Bool())
 }
 
+// Mixin io of a core
 trait HasCoreIO extends HasTileParameters {
   implicit val p: Parameters
   val io = new CoreBundle()(p) {

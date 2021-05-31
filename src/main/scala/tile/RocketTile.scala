@@ -36,6 +36,19 @@ case class RocketTileParams(
   }
 }
 
+/**
+  * In Chipyard, all Tiles are diplomatically instantiated. In the first phase, diplomatic nodes
+  *  which specify Tile-to-System interconnects are evaluated, while in the second “Module
+  *  Implementation” phase, hardware is elaborated. In this step, you will need to implement a
+  *  tile class for your core, which specifies the constraints on the core’s parameters and the
+  *  connections with other diplomatic nodes. This class usually contains Diplomacy/TileLink
+  *  code only, and Chisel RTL code should not go here.
+  *
+  * @param rocketParams Parameters to instantiate a RocketTile
+  * @param crossing
+  * @param lookup
+  * @param q
+  */
 class RocketTile private(
       val rocketParams: RocketTileParams,
       crossing: ClockCrossingType,
@@ -52,6 +65,7 @@ class RocketTile private(
   def this(params: RocketTileParams, crossing: TileCrossingParamsLike, lookup: LookupByHartIdImpl)(implicit p: Parameters) =
     this(params, crossing.crossingType, lookup, p)
 
+  // Required TileLink nodes
   val intOutwardNode = IntIdentityNode()
   val slaveNode = TLIdentityNode()
   val masterNode = visibilityNode
@@ -63,6 +77,7 @@ class RocketTile private(
   }}
   dtim_adapter.foreach(lm => connectTLSlave(lm.node, lm.node.portParams.head.beatBytes))
 
+  // Instantiate bus-error unit according to beuAddr
   val bus_error_unit = rocketParams.beuAddr map { a =>
     val beu = LazyModule(new BusErrorUnit(new L1BusErrors, BusErrorUnitParams(a), logicalTreeNode))
     intOutwardNode := beu.intNode
@@ -92,6 +107,7 @@ class RocketTile private(
   val beuProperty = bus_error_unit.map(d => Map(
           "sifive,buserror" -> d.device.asProperty)).getOrElse(Nil)
 
+  // Required entry of CPU device in the device tree for interrupt purpose
   val cpuDevice: SimpleDevice = new SimpleDevice("cpu", Seq("sifive,rocket0", "riscv")) {
     override def parent = Some(ResourceAnchors.cpus)
     override def describe(resources: ResourceBindings): Description = {
@@ -105,6 +121,7 @@ class RocketTile private(
     Resource(cpuDevice, "reg").bind(ResourceAddress(staticIdForMetadataUseOnly))
   }
 
+  // Implementation class (See below)
   override lazy val module = new RocketTileModuleImp(this)
 
   override def makeMasterBoundaryBuffers(crossing: ClockCrossingType)(implicit p: Parameters) = crossing match {
@@ -130,6 +147,18 @@ class RocketTile private(
     LogicalModuleTree.add(logicalTreeNode, utlbLogicalTreeNode)
   }
 }
+
+/**
+  * The implementation class contains the parameterized, actual hardware that depends on the values
+  *  resolved by the Diplomacy framework according to the info provided in the Tile class. This class
+  *  will normally contains Chisel RTL code. If your core is in Verilog, you will need to instantiate
+  *  the black box class that wraps your Verilog implementation and connect it with the buses and other
+  *  components. No Diplomacy/TileLink code should be in this class; you should only connect the IO
+  *  signals in TileLink interfaces or other diplomatically defined components, which are located
+  *  in the tile class.
+  *
+  * @param outer RocketTileModule
+  */
 
 class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
     with HasFpuOpt

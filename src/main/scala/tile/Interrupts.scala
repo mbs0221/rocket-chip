@@ -18,6 +18,7 @@ class NMI(val w: Int) extends Bundle {
   val unmi_exception_vector = UInt(w.W)
 }
 
+// Define tile level interrupts io port
 class TileInterrupts(implicit p: Parameters) extends CoreBundle()(p) {
   val debug = Bool()
   val mtip = Bool()
@@ -27,6 +28,11 @@ class TileInterrupts(implicit p: Parameters) extends CoreBundle()(p) {
   val lip = Vec(coreParams.nLocalInterrupts, Bool())
   val nmi = usingNMI.option(new NMI(resetVectorLen))
 }
+
+/**
+ * All tile classes implement BaseTile and will normally implement `SinksExternalInterrupts` 
+ * and `SourcesExternalNotifications`, which allow the tile to accept external interrupt. 
+ */
 
 // Use diplomatic interrupts to external interrupts from the subsystem into the tile
 trait SinksExternalInterrupts { this: BaseTile =>
