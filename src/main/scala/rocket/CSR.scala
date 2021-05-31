@@ -772,7 +772,7 @@ class CSRFile(
   val exception = insn_call || insn_break || io.exception
   assert(PopCount(insn_ret :: insn_call :: insn_break :: io.exception :: Nil) <= 1, "these conditions must be mutually exclusive")
 
-  // WFI status
+  // wfi status
   when (insn_wfi && !io.singleStep && !reg_debug) { reg_wfi := true }
   when (pending_interrupts.orR || io.interrupts.debug || exception) { reg_wfi := false }
   io.interrupts.nmi.map(nmi => when (nmi.unmi || nmi.rnmi) { reg_wfi := false } )
