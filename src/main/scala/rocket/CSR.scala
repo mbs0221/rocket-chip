@@ -252,6 +252,14 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
     val set_vstart = Valid(vstart).flip
     val set_vxsat = Bool().asInput
   })
+
+  val bcs = usingBCS.option(new Bundle {
+    val value = UInt(width = xLen)
+    val start = UInt(width = vaddrBitsExtended)
+    val end = UInt(width = vaddrBitsExtended)
+    val set_start = Valid(start).flip
+    val set_end = Valid(end).flip
+  })
 }
 
 class VConfig(implicit p: Parameters) extends CoreBundle {
@@ -307,6 +315,28 @@ class VType(implicit p: Parameters) extends CoreBundle {
     val atLeastVLMax = atLeastMaxVLMax || (avl_lsbs & (-maxVLMax.S >> (this.vsew +& Cat(this.vlmul_sign, ~this.vlmul_mag))).asUInt.andNot(minVLMax-1)).orR
     val isZero = vill || useZero
     Mux(!isZero && atLeastVLMax, vlMax, 0.U) | Mux(!isZero && !atLeastVLMax, avl_lsbs, 0.U)
+  }
+}
+
+// Branch Context Store (BCS)
+
+class BCSConfig(implicit p: Parameters) extends CoreBundle {
+  val bcs_base = UInt(width = vaddrBitsExtended)
+  val bcs_end = UInt(width = vaddrBitsExtended)
+  val bcs = new BCS
+}
+
+object BCS {
+
+}
+
+class BCS(implicit p: Parameters) extends CoreBundle {
+    
+  val bcs = UInt(width = xLen)
+
+  def update(pc: UInt, target: UInt): UInt = {
+    val diff = pc ^ target
+    Cat(bcs(55,0), diff(3,0)).asUInt
   }
 }
 
@@ -442,6 +472,11 @@ class CSRFile(
   val reg_fflags = Reg(UInt(width = 5))
   val reg_frm = Reg(UInt(width = 3))
 
+  // U-mode BCS
+  val reg_bcs = usingBCS.option(Reg(UInt(width = xLen)))
+  val reg_bcsbase = usingBCS.option(Reg(UInt(width = vaddrBitsExtended)))
+  val reg_bcsend = usingBCS.option(Reg(UInt(width = vaddrBitsExtended)))
+
   // Vector extension
   val reg_vconfig = usingVector.option(Reg(new VConfig))
   val reg_vstart = usingVector.option(Reg(UInt(maxVLMax.log2.W)))
@@ -564,11 +599,18 @@ class CSRFile(
     CSRs.vl -> reg_vconfig.get.vl,
     CSRs.vlenb -> (vLen / 8).U)
 
+  // CSRs for BCS
+  val bcs_csrs = if(!usingBCS) LinkedHashMap() else LinkedHashMap[Int,Bits](
+    CSRs.bcs -> reg_bcs.get,
+    CSRs.bcsbase -> reg_bcsbase.get,
+    CSRs.bcsend -> reg_bcsend.get)
+
   read_mapping ++= debug_csrs
   read_mapping ++= nmi_csrs
   read_mapping ++= context_csrs
   read_mapping ++= fp_csrs
   read_mapping ++= vector_csrs
+  read_mapping ++= bcs_csrs
 
   // performance counters
   if (coreParams.haveBasicCounters) {
@@ -1148,6 +1190,12 @@ class CSRFile(
         reg_vxsat.get := wdata
         reg_vxrm.get := wdata >> 1
       }
+    }
+    // BCS Extension
+    if (usingBCS) {
+      when (decoded_addr(CSRs.bcs)) { reg_bcs.get := wdata }
+      when (decoded_addr(CSRs.bcsbase)) { reg_bcsbase.get := wdata }
+      when (decoded_addr(CSRs.bcsend)) { reg_bcsend.get := wdata }
     }
   }
 

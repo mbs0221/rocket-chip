@@ -22,6 +22,7 @@ trait CoreParams {
   val useAtomicsOnlyForIO: Boolean
   val useCompressed: Boolean
   val useBitManip: Boolean = false
+  val useBCS: Boolean = true
   val useVector: Boolean = false
   val useSCIE: Boolean
   val useRVE: Boolean
@@ -81,6 +82,7 @@ trait HasCoreParameters extends HasTileParameters {
   val usingVector = coreParams.useVector
   val usingSCIE = coreParams.useSCIE
   val usingNMI = coreParams.useNMI
+  val usingBCS = coreParams.useBCS
 
   val retireWidth = coreParams.retireWidth
   val fetchWidth = coreParams.fetchWidth
