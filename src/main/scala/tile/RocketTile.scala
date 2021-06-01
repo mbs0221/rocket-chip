@@ -44,8 +44,8 @@ case class RocketTileParams(
   *  connections with other diplomatic nodes. This class usually contains Diplomacy/TileLink
   *  code only, and Chisel RTL code should not go here.
   * 
-  * All tile classes implement BaseTile and will normally implement `SinksExternalInterrupts` and `SourcesExternalNotifications`,
-  *  which allow the tile to accept external interrupt.
+  * All tile classes implement BaseTile and will normally implement [[SinksExternalInterrupts]]
+  *  and [[SourcesExternalNotifications]], which allow the tile to accept external interrupt.
   *
   * @param rocketParams Parameters to instantiate a RocketTile
   * @param crossing
@@ -171,9 +171,10 @@ class RocketTileModuleImp(outer: RocketTile) extends BaseTileModuleImp(outer)
 
   val core = Module(new Rocket(outer)(outer.p))
 
-  // Also, the tile can also notify other cores or devices for some events by calling following functions
-  //  in `SourcesExternalNotifications` from the implementation class: (These functions can be found in
-  //  in the trait `SourcesExternalNotifications` in the file Interrupts.scala)
+  /** Also, the tile can also notify other cores or devices for some events by calling following functions
+    *  in [[SourcesExternalNotifications]] from the implementation class: (These functions can be found in
+    *  in the trait [[SourcesExternalNotifications]] in the file [[Interrupts.scala]])
+    */
 
   // Report unrecoverable error conditions; for now the only cause is cache ECC errors
   outer.reportHalt(List(outer.dcache.module.io.errors))

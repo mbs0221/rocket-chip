@@ -31,8 +31,8 @@ class TileInterrupts(implicit p: Parameters) extends CoreBundle()(p) {
 
 /**
   * Chipyard allows a tile to either receive interrupts from other devices or initiate interrupts to notify
-  *  other cores/devices. In the tile that inherited `SinksExternalInterrupts`, one can create a
-  *  `TileInterrupts` object (a Chisel bundle) and call `decodeCoreInterrupts()` with the object as the
+  *  other cores/devices. In the tile that inherited [[SinksExternalInterrupts]], one can create a
+  *  [[TileInterrupts]] object (a Chisel bundle) and call [[decodeCoreInterrupts()]] with the object as the
   *  argument. Note that you should call this function in the implementation class since it returns a Chisel
   *  bundle used by RTL code. You can then read the interrupt bits from the `TileInterrupts` bundle we create above.
   */
