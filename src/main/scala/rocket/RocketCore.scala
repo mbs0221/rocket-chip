@@ -59,7 +59,7 @@ case class RocketCoreParams(
   val instBits: Int = if (useCompressed) 16 else 32
   val lrscCycles: Int = 80 // worst case is 14 mispredicted branches + slop
   override def minFLen: Int = fpu.map(_.minFLen).getOrElse(32)
-  override def customCSRs(implicit p: Parameters) = new RocketCustomCSRs
+  override def customCSRs(implicit p: Parameters) = if (useBCS) new VC709CustomCSRs else new RocketCustomCSRs
 }
 
 trait HasRocketCoreParameters extends HasCoreParameters {
@@ -102,6 +102,17 @@ class RocketCustomCSRs(implicit p: Parameters) extends CustomCSRs with HasRocket
   def mimpid = CustomCSR.constant(CSRs.mimpid, BigInt(rocketParams.mimpid))
 
   override def decls = super.decls :+ marchid :+ mvendorid :+ mimpid
+}
+
+class VC709CustomCSRs(implicit p: Parameters) extends RocketCustomCSRs {
+ 
+  def bcs = CustomCSR.constant(CSRs.bcs, BigInt(1))
+
+  def bcsbase = CustomCSR.constant(CSRs.bcsbase, BigInt(vaddrBitsExtended))
+
+  def bcsend = CustomCSR.constant(CSRs.bcsend, BigInt(vaddrBitsExtended))
+
+  override def decls = super.decls :+ bcs :+ bcsbase :+ bcsend
 }
 
 @chiselName
@@ -952,6 +963,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // evaluate performance counters
   val icache_blocked = !(io.imem.resp.valid || RegNext(io.imem.resp.valid))
   csr.io.counters foreach { c => c.inc := RegNext(perfEvents.evaluate(c.eventSel)) }
+
+  // The BCS module is updated just like hpm counters
+  // csr.io.customCSRs.bcs 
 
   val coreMonitorBundle = Wire(new CoreMonitorBundle(xLen, fLen))
 
