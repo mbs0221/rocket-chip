@@ -1164,9 +1164,9 @@ object CSRs {
   val mhpmcounter29h = 0xb9d
   val mhpmcounter30h = 0xb9e
   val mhpmcounter31h = 0xb9f
-  val bcs = 0x5c0
-  val bcsbase = 0x5c1
-  val bcsend = 0x5c2
+  val bcs = 0x8c0
+  val bcsbase = 0x8c1
+  val bcsend = 0x8c2
   val all = {
     val res = collection.mutable.ArrayBuffer[Int]()
     res += fflags

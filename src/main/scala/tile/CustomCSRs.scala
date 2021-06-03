@@ -40,11 +40,27 @@ class CustomCSRs(implicit p: Parameters) extends CoreBundle {
   def disableSpeculativeICacheRefill = getOrElse(chickenCSR, _.value(3), false.B)
   def suppressCorruptOnGrantData = getOrElse(chickenCSR, _.value(9), false.B)
 
+  /**
+    * Apply function to csr registers
+    *
+    * @param id register id
+    * @param f function
+    * @param alt alternative value
+    * @return value
+    */
   protected def getByIdOrElse[T](id: Int, f: CustomCSRIO => T, alt: T): T = {
     val idx = decls.indexWhere(_.id == id)
     if (idx < 0) alt else f(csrs(idx))
   }
 
+  /**
+    * Apply function to csr registers
+    * 
+    * @param csr CSR object
+    * @param f function
+    * @param alt alternative value
+    * @return value
+    */
   protected def getOrElse[T](csr: Option[CustomCSR], f: CustomCSRIO => T, alt: T): T =
     csr.map(c => getByIdOrElse(c.id, f, alt)).getOrElse(alt)
 }

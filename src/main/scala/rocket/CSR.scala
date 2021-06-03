@@ -445,12 +445,10 @@ class CSRFile(
   val reg_wfi = withClock(io.ungated_clock) { Reg(init=Bool(false)) }
 
   //** U-mode FP status **//
-
   val reg_fflags = Reg(UInt(width = 5))
   val reg_frm = Reg(UInt(width = 3))
 
   //** V-extension **//
-
   val reg_vconfig = usingVector.option(Reg(new VConfig))
   val reg_vstart = usingVector.option(Reg(UInt(maxVLMax.log2.W)))
   val reg_vxsat = usingVector.option(Reg(Bool()))
@@ -461,6 +459,11 @@ class CSRFile(
   val reg_instret = WideCounter(64, io.retire, inhibit = reg_mcountinhibit(2))
   val reg_cycle = if (enableCommitLog) WideCounter(64, io.retire,     inhibit = reg_mcountinhibit(0))
     else withClock(io.ungated_clock) { WideCounter(64, !io.csr_stall, inhibit = reg_mcountinhibit(0)) }
+
+  //** U-mode BCS **//
+  val reg_bcs = usingBCS.option(Reg(UInt(width = 64)))
+  val reg_bcsbase = usingBCS.option(Reg(UInt(width = vaddrBitsExtended)))
+  val reg_bcsend = usingBCS.option(Reg(UInt(width = vaddrBitsExtended)))
 
   //** HPM **//
   val reg_hpmevent = io.counters.map(c => Reg(init = UInt(0, xLen)))
@@ -580,11 +583,18 @@ class CSRFile(
     CSRs.vl -> reg_vconfig.get.vl,
     CSRs.vlenb -> (vLen / 8).U)
 
+  // BCS
+  val bcs_csrs = if (!usingBCS) LinkedHashMap() else LinkedHashMap[Int,Bits](
+    CSRs.bcs -> reg_bcs.get,
+    CSRs.bcsbase -> reg_bcsbase.get,
+    CSRs.bcsend -> reg_bcsend.get)
+
   read_mapping ++= debug_csrs
   read_mapping ++= nmi_csrs
   read_mapping ++= context_csrs
   read_mapping ++= fp_csrs
   read_mapping ++= vector_csrs
+  read_mapping ++= bcs_csrs
 
   // HPM
   if (coreParams.haveBasicCounters) {
@@ -1174,6 +1184,11 @@ class CSRFile(
         reg_vxsat.get := wdata
         reg_vxrm.get := wdata >> 1
       }
+    }
+    if (usingBCS) {
+      when (decoded_addr(CSRs.bcs)) { reg_bcs.get := wdata }
+      when (decoded_addr(CSRs.bcsbase)) { reg_bcsbase.get := wdata }
+      when (decoded_addr(CSRs.bcsend)) { reg_bcsend.get := wdata }
     }
   }
 
