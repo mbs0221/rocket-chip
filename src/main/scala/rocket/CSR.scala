@@ -252,6 +252,15 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
     val set_vstart = Valid(vstart).flip
     val set_vxsat = Bool().asInput
   })
+
+  val mem_npc = usingBCS.option(UInt(INPUT, width = vaddrBitsExtended))
+  val bcs_update = usingBCS.option(Bool(INPUT))
+}
+
+class BCS(implicit p: Parameters) extends CoreBundle {
+  val value = UInt(width = 64)
+  val base = UInt(width = vaddrBitsExtended)
+  val end = UInt(width = vaddrBitsExtended)
 }
 
 class VConfig(implicit p: Parameters) extends CoreBundle {
@@ -461,9 +470,7 @@ class CSRFile(
     else withClock(io.ungated_clock) { WideCounter(64, !io.csr_stall, inhibit = reg_mcountinhibit(0)) }
 
   //** U-mode BCS **//
-  val reg_bcs = usingBCS.option(Reg(UInt(width = 64)))
-  val reg_bcsbase = usingBCS.option(Reg(UInt(width = vaddrBitsExtended)))
-  val reg_bcsend = usingBCS.option(Reg(UInt(width = vaddrBitsExtended)))
+  val reg_bcs = usingBCS.option(Reg(new BCS))
 
   //** HPM **//
   val reg_hpmevent = io.counters.map(c => Reg(init = UInt(0, xLen)))
@@ -585,9 +592,9 @@ class CSRFile(
 
   // BCS
   val bcs_csrs = if (!usingBCS) LinkedHashMap() else LinkedHashMap[Int,Bits](
-    CSRs.bcs -> reg_bcs.get,
-    CSRs.bcsbase -> reg_bcsbase.get,
-    CSRs.bcsend -> reg_bcsend.get)
+    CSRs.bcs -> reg_bcs.get.value,
+    CSRs.bcsbase -> reg_bcs.get.base,
+    CSRs.bcsend -> reg_bcs.get.end)
 
   read_mapping ++= debug_csrs
   read_mapping ++= nmi_csrs
@@ -683,9 +690,6 @@ class CSRFile(
 
   // mimpid, marchid, and mvendorid are 0 unless overridden by customCSRs
   Seq(CSRs.mimpid, CSRs.marchid, CSRs.mvendorid).foreach(id => read_mapping.getOrElseUpdate(id, 0.U))
-
-  // CSRs.bcs, CSRs.bcsbase, CSRs.bcsend
-  Seq(CSRs.bcs, CSRs.bcsbase, CSRs.bcsend).foreach(id => read_mapping.getOrElseUpdate(id, 0.U))
 
   //** Decode Logic **//
 
@@ -1186,9 +1190,9 @@ class CSRFile(
       }
     }
     if (usingBCS) {
-      when (decoded_addr(CSRs.bcs)) { reg_bcs.get := wdata }
-      when (decoded_addr(CSRs.bcsbase)) { reg_bcsbase.get := wdata }
-      when (decoded_addr(CSRs.bcsend)) { reg_bcsend.get := wdata }
+      when (decoded_addr(CSRs.bcs)) { reg_bcs.get.value := wdata }
+      when (decoded_addr(CSRs.bcsbase)) { reg_bcs.get.base := wdata }
+      when (decoded_addr(CSRs.bcsend)) { reg_bcs.get.end := wdata }
     }
   }
 
@@ -1211,6 +1215,18 @@ class CSRFile(
       reg_vconfig.get.vl := 0.U
       reg_vconfig.get.vtype := 0.U.asTypeOf(new VType)
       reg_vconfig.get.vtype.vill := true
+    }
+  }
+
+  // BCS-Extension
+  if (usingBCS) {
+    val bcs_update = io.bcs_update.get
+    when (bcs_update) {
+      val bcs = reg_bcs.get
+      val mem_npc = io.mem_npc.get
+      when ((io.pc >= bcs.base) && (io.pc <= bcs.end)) {
+        bcs.value := Cat(bcs.value(63, 40), mem_npc)
+      }
     }
   }
 

@@ -767,7 +767,10 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     iobpw.valid(0) := wphit
     iobpw.action := bp.control.action
   }
-
+  if (usingBCS) {
+    csr.io.mem_npc.get := mem_npc
+    csr.io.bcs_update.get := wb_valid && (wb_ctrl.jal || wb_ctrl.jalr)
+  }
   /** Hazard Detection
     * - ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
     * - ID.wxd && ID.rd =/= 0 && ID.rd == {EX, MEM, WB}.rd
@@ -952,9 +955,6 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   // evaluate performance counters
   val icache_blocked = !(io.imem.resp.valid || RegNext(io.imem.resp.valid))
   csr.io.counters foreach { c => c.inc := RegNext(perfEvents.evaluate(c.eventSel)) }
-
-  // The BCS module is updated just like hpm counters
-  // csr.io.customCSRs.bcs 
 
   val coreMonitorBundle = Wire(new CoreMonitorBundle(xLen, fLen))
 
