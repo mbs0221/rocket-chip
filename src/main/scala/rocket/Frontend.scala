@@ -177,6 +177,7 @@ class FrontendModule(outer: Frontend) extends LazyModuleImp(outer)
 
   if (usingBTB) {
     val btb = Module(new BTB)
+    // connect to BTB input
     btb.io.flush := false
     btb.io.req.valid := false
     btb.io.req.bits.addr := s1_pc
@@ -289,6 +290,7 @@ class FrontendModule(outer: Frontend) extends LazyModuleImp(outer)
       }
     }
 
+    // BTB update
     when (!io.cpu.btb_update.valid) {
       val fetch_bubble_likely = !fq.io.mask(1)
       btb.io.btb_update.valid := fq.io.enq.fire() && !wrong_path && fetch_bubble_likely && updateBTB
@@ -299,6 +301,7 @@ class FrontendModule(outer: Frontend) extends LazyModuleImp(outer)
       btb.io.btb_update.bits.pc := s2_base_pc
     }
 
+    // RAS update
     btb.io.ras_update.bits.returnAddr := s2_base_pc + (after_idx << log2Ceil(coreInstBytes))
 
     val taken = scanInsns(0, s2_partial_insn_valid, s2_partial_insn, false.B)

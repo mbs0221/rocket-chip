@@ -286,6 +286,7 @@ class BTB(implicit p: Parameters) extends BtbModule {
     pageValid := pageValid | tgtPageReplEn | idxPageReplEn
   }
 
+  // BTB response
   io.resp.valid := (pageHit << 1)(Mux1H(idxHit, idxPages))
   io.resp.bits.taken := true
   io.resp.bits.target := Cat(pagesMasked(Mux1H(idxHit, tgtPages)), Mux1H(idxHit, tgts) << log2Up(coreInstBytes))
