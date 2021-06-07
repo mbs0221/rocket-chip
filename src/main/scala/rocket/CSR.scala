@@ -1223,9 +1223,10 @@ class CSRFile(
     val bcs_update = io.bcs_update.get
     when (bcs_update) {
       val bcs = reg_bcs.get
-      val mem_npc = io.mem_npc.get
       when ((io.pc >= bcs.base) && (io.pc <= bcs.end)) {
-        bcs.value := Cat(bcs.value(63, 40), mem_npc)
+        val mem_npc = io.mem_npc.get
+        val hash = io.pc ^ mem_npc
+        bcs.value := Cat(bcs.value(55, 0), hash(7,0))
       }
     }
   }

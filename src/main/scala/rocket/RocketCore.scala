@@ -241,6 +241,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   val wb_reg_cause           = Reg(UInt())
   val wb_reg_sfence = Reg(Bool())
   val wb_reg_pc = Reg(UInt())
+  val wb_reg_npc = Reg(UInt())
   val wb_reg_mem_size = Reg(UInt())
   val wb_reg_inst = Reg(Bits())
   val wb_reg_raw_inst = Reg(UInt())
@@ -654,6 +655,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     wb_reg_raw_inst := mem_reg_raw_inst
     wb_reg_mem_size := mem_reg_mem_size
     wb_reg_pc := mem_reg_pc
+    wb_reg_npc := mem_npc
     wb_reg_wphit := mem_reg_wphit | bpu.io.bpwatch.map { bpw => (bpw.rvalid(0) && mem_reg_load) || (bpw.wvalid(0) && mem_reg_store) }
   }
 
@@ -768,8 +770,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     iobpw.action := bp.control.action
   }
   if (usingBCS) {
-    csr.io.mem_npc.get := mem_npc
-    csr.io.bcs_update.get := wb_valid && (wb_ctrl.jal || wb_ctrl.jalr)
+    csr.io.mem_npc.get := wb_reg_npc
+    csr.io.bcs_update.get := wb_valid && wb_ctrl.jalr
   }
   /** Hazard Detection
     * - ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
