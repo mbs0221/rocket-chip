@@ -1167,6 +1167,7 @@ object CSRs {
   val bcs = 0x8c0
   val bcsbase = 0x8c1
   val bcsend = 0x8c2
+  val bcscfg = 0x8c3
   val all = {
     val res = collection.mutable.ArrayBuffer[Int]()
     res += fflags

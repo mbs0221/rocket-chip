@@ -257,10 +257,16 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
   val bcs_update = usingBCS.option(Bool(INPUT))
 }
 
+class BCSConfig(implicit p: Parameters) extends CoreBundle {
+  val en = Bool()
+  val reserved = UInt(7.W)
+}
+
 class BCS(implicit p: Parameters) extends CoreBundle {
   val value = UInt(width = 64)
   val base = UInt(width = vaddrBitsExtended)
   val end = UInt(width = vaddrBitsExtended)
+  val cfg = new BCSConfig
 }
 
 class VConfig(implicit p: Parameters) extends CoreBundle {
@@ -594,7 +600,8 @@ class CSRFile(
   val bcs_csrs = if (!usingBCS) LinkedHashMap() else LinkedHashMap[Int,Bits](
     CSRs.bcs -> reg_bcs.get.value,
     CSRs.bcsbase -> reg_bcs.get.base,
-    CSRs.bcsend -> reg_bcs.get.end)
+    CSRs.bcsend -> reg_bcs.get.end,
+    CSRs.bcscfg -> reg_bcs.get.cfg.asUInt)
 
   read_mapping ++= debug_csrs
   read_mapping ++= nmi_csrs
@@ -1190,9 +1197,11 @@ class CSRFile(
       }
     }
     if (usingBCS) {
-      when (decoded_addr(CSRs.bcs)) { reg_bcs.get.value := wdata }
-      when (decoded_addr(CSRs.bcsbase)) { reg_bcs.get.base := wdata }
-      when (decoded_addr(CSRs.bcsend)) { reg_bcs.get.end := wdata }
+      val bcs = reg_bcs.get
+      when (decoded_addr(CSRs.bcs)) { bcs.value := wdata }
+      when (decoded_addr(CSRs.bcsbase)) { bcs.base := wdata }
+      when (decoded_addr(CSRs.bcsend)) { bcs.end := wdata }
+      when (decoded_addr(CSRs.bcscfg)) { bcs.cfg := wdata.asTypeOf(bcs.cfg) }
     }
   }
 
@@ -1223,10 +1232,13 @@ class CSRFile(
     val bcs_update = io.bcs_update.get
     when (bcs_update) {
       val bcs = reg_bcs.get
-      when ((io.pc >= bcs.base) && (io.pc <= bcs.end)) {
-        val mem_npc = io.mem_npc.get
-        val hash = io.pc ^ mem_npc
-        bcs.value := Cat(bcs.value(55, 0), hash(7,0))
+      val cfg = bcs.cfg
+      when (cfg.en) {
+        when ((io.pc >= bcs.base) && (io.pc <= bcs.end)) {
+          val mem_npc = io.mem_npc.get
+          val hash = io.pc ^ mem_npc
+          bcs.value := Cat(bcs.value(55, 0), hash(7,0))
+        }
       }
     }
   }
