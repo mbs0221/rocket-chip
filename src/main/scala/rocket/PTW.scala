@@ -17,10 +17,24 @@ import freechips.rocketchip.util.property._
 import freechips.rocketchip.diplomaticobjectmodel.model.OMSRAM
 import scala.collection.mutable.ListBuffer
 
+/** PTW Request
+  * addr: virtual page number
+  *
+  * @param p
+  */
 class PTWReq(implicit p: Parameters) extends CoreBundle()(p) {
   val addr = UInt(width = vpnBits)
 }
 
+/** PTW Response
+  * ae: Access Error
+  * pte: Page Tale Entry
+  * level: level of pte
+  * fragmented_superpage:
+  * homogeneous:
+  * 
+  * @param p
+  */
 class PTWResp(implicit p: Parameters) extends CoreBundle()(p) {
   val ae = Bool()
   val pte = new PTE
@@ -29,6 +43,13 @@ class PTWResp(implicit p: Parameters) extends CoreBundle()(p) {
   val homogeneous = Bool()
 }
 
+/** TLB-PTW IO
+  * PTW get request from TLB
+  * TLB get response from PTW
+  * CSRs: PTBR, MStatus, PMP, customCSRs
+  * 
+  * @param p
+  */
 class TLBPTWIO(implicit p: Parameters) extends CoreBundle()(p)
     with HasCoreParameters {
   val req = Decoupled(Valid(new PTWReq))
@@ -39,6 +60,13 @@ class TLBPTWIO(implicit p: Parameters) extends CoreBundle()(p)
   val customCSRs = coreParams.customCSRs.asInput
 }
 
+/** PTW Perf Events
+  * l2miss:
+  * l2hit:
+  * pte_miss:
+  * pte_hit:
+  *
+  */
 class PTWPerfEvents extends Bundle {
   val l2miss = Bool()
   val l2hit = Bool()
@@ -192,12 +220,14 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
 
     (hit && count < pgLevels-1, Mux1H(hits, data))
   }
+  // pte-hit event
   val pte_hit = RegNext(false.B)
   io.dpath.perf.pte_miss := false
   io.dpath.perf.pte_hit := pte_hit && (state === s_req) && !io.dpath.perf.l2hit
   assert(!(io.dpath.perf.l2hit && (io.dpath.perf.pte_miss || io.dpath.perf.pte_hit)),
     "PTE Cache Hit/Miss Performance Monitor Events are lower priority than L2TLB Hit event")
 
+  // l2-refill event
   val l2_refill = RegNext(false.B)
   l2_refill_wire := l2_refill
   io.dpath.perf.l2miss := false
@@ -261,6 +291,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     val s2_entry_vec = s2_rdata.map(_.uncorrected.asTypeOf(new L2TLBEntry(nL2TLBSets)))
     val s2_hit_vec = (0 until coreParams.nL2TLBWays).map(way => s2_valid_vec(way) && (r_tag === s2_entry_vec(way).tag))
     val s2_hit = s2_valid && s2_hit_vec.orR
+    // perfcounters
     io.dpath.perf.l2miss := s2_valid && !(s2_hit_vec.orR)
     io.dpath.perf.l2hit := s2_hit
     when (s2_hit) {
@@ -284,6 +315,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   // if SFENCE occurs during walk, don't refill PTE cache or L2 TLB until next walk
   invalidated := io.dpath.sfence.valid || (invalidated && state =/= s_ready)
 
+  // memory request
   io.mem.req.valid := state === s_req || state === s_dummy1
   io.mem.req.bits.phys := Bool(true)
   io.mem.req.bits.cmd  := M_XRD
@@ -309,6 +341,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   val pmpHomogeneous = new PMPHomogeneityChecker(io.dpath.pmp).apply(pte_addr >> pgIdxBits << pgIdxBits, count)
   val homogeneous = pmaHomogeneous && pmpHomogeneous
 
+  // response to TLB
   for (i <- 0 until io.requestor.size) {
     io.requestor(i).resp.valid := resp_valid(i)
     io.requestor(i).resp.bits.ae := resp_ae
@@ -327,12 +360,14 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   state := OptimizationBarrier(next_state)
 
   switch (state) {
+    // s_ready -> [s_req, s_ready]
     is (s_ready) {
       when (arb.io.out.fire()) {
         next_state := Mux(arb.io.out.bits.valid, s_req, s_ready)
       }
       count := pgLevels - minPgLevels - io.dpath.ptbr.additionalPgLevels
     }
+    // s_req -> [s_wait1, s_req]
     is (s_req) {
       when (pte_cache_hit) {
         count := count + 1
@@ -341,10 +376,12 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
         next_state := Mux(io.mem.req.ready, s_wait1, s_req)
       }
     }
+    // s_wait1 -> [s_req, s_wait2]
     is (s_wait1) {
       // This Mux is for the l2_error case; the l2_hit && !l2_error case is overriden below
       next_state := Mux(l2_hit, s_req, s_wait2)
     }
+    // s_wait2 -> [s_wait3, s_ready]
     is (s_wait2) {
       next_state := s_wait3
       io.dpath.perf.pte_miss := count < pgLevels-1
@@ -354,6 +391,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
         resp_valid(r_req_dest) := true
       }
     }
+    // s_fragment_superpage -> [s_ready]
     is (s_fragment_superpage) {
       next_state := s_ready
       resp_valid(r_req_dest) := true
@@ -365,11 +403,13 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     }
   }
 
+  // only the ppn is updated
   def makePTE(ppn: UInt, default: PTE) = {
     val pte = Wire(init = default)
     pte.ppn := ppn
     pte
   }
+  // modify dafault pte
   r_pte := OptimizationBarrier(
     Mux(mem_resp_valid, pte,
     Mux(l2_hit && !l2_error, l2_pte,
@@ -378,6 +418,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     Mux(arb.io.out.fire(), makePTE(io.dpath.ptbr.ppn, r_pte),
     r_pte))))))
 
+  // [s_req | s_wait1] -> s_ready
   when (l2_hit && !l2_error) {
     assert(state === s_req || state === s_wait1)
     next_state := s_ready
@@ -385,6 +426,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     resp_ae := false
     count := pgLevels-1
   }
+  // s_wait3 -> [s_req | s_fragment_superpage | s_ready ]
   when (mem_resp_valid) {
     assert(state === s_wait3)
     when (traverse) {
@@ -402,6 +444,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       }
     }
   }
+  // s_wait2 -> s_req
   when (io.mem.s2_nack) {
     assert(state === s_wait2)
     next_state := s_req

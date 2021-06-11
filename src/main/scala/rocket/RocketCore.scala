@@ -496,7 +496,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
 
     // bypass logic of EX stage
     for (i <- 0 until id_raddr.size) {
-      // whether the register can has bypass
+      // whether the register has bypass source
       val do_bypass = id_bypass_src(i).reduce(_||_)
       // which value will be used in bypass
       val bypass_src = PriorityEncoder(id_bypass_src(i))
@@ -771,7 +771,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
   }
   if (usingBCS) {
     csr.io.mem_npc.get := wb_reg_npc
-    csr.io.bcs_update.get := wb_valid && wb_ctrl.jalr
+    csr.io.bcs_update.get := wb_valid && (wb_ctrl.jalr)
   }
   /** Hazard Detection
     * - ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
