@@ -36,10 +36,10 @@ class MStatus extends Bundle {
   val sum = Bool()
   val mprv = Bool()
   val xs = UInt(width = 2)
-  val fs = UInt(width = 2)
-  val mpp = UInt(width = 2)
-  val vs = UInt(width = 2)
-  val spp = UInt(width = 1)
+  val fs = UInt(width = 2)     // float status
+  val mpp = UInt(width = 2)    // machine previous priviledge
+  val vs = UInt(width = 2)     // vector status
+  val spp = UInt(width = 1)    // supervisor previous priviledge
   val mpie = Bool()
   val hpie = Bool()
   val spie = Bool()
@@ -253,8 +253,8 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
     val set_vxsat = Bool().asInput
   })
 
-  val mem_npc = usingBCS.option(UInt(INPUT, width = vaddrBitsExtended))
-  val bcs_update = usingBCS.option(Bool(INPUT))
+  val wb_npc = usingBCS.option(Valid(UInt(width = vaddrBitsExtended)).flip)
+  val bcs_addr = usingBCS.option(Valid(UInt(width = vaddrBitsExtended)))
 }
 
 class BCSConfig(implicit p: Parameters) extends CoreBundle {
@@ -264,6 +264,7 @@ class BCSConfig(implicit p: Parameters) extends CoreBundle {
 
 class BCS(implicit p: Parameters) extends CoreBundle {
   val value = UInt(width = 64)
+  val addr = UInt(width = vaddrBitsExtended)
   val base = UInt(width = vaddrBitsExtended)
   val end = UInt(width = vaddrBitsExtended)
   val cfg = new BCSConfig
@@ -408,7 +409,7 @@ class CSRFile(
   //** Physical Memory Protection **//
   val reg_pmp = Reg(Vec(nPMPs, new PMPReg))
 
-  //** M-mode exception handling **//
+  //** Machine interrupt registers **//
   val reg_mie = Reg(UInt(width = xLen))
   val (reg_mideleg, read_mideleg) = {
     val reg = Reg(UInt(xLen.W))
@@ -599,6 +600,7 @@ class CSRFile(
   // BCS
   val bcs_csrs = if (!usingBCS) LinkedHashMap() else LinkedHashMap[Int,Bits](
     CSRs.bcs -> reg_bcs.get.value,
+    CSRs.bcsaddr -> reg_bcs.get.addr,
     CSRs.bcsbase -> reg_bcs.get.base,
     CSRs.bcsend -> reg_bcs.get.end,
     CSRs.bcscfg -> reg_bcs.get.cfg.asUInt)
@@ -1199,6 +1201,7 @@ class CSRFile(
     if (usingBCS) {
       val bcs = reg_bcs.get
       when (decoded_addr(CSRs.bcs)) { bcs.value := wdata }
+      when (decoded_addr(CSRs.bcsaddr)) { bcs.addr := wdata }
       when (decoded_addr(CSRs.bcsbase)) { bcs.base := wdata }
       when (decoded_addr(CSRs.bcsend)) { bcs.end := wdata }
       when (decoded_addr(CSRs.bcscfg)) { bcs.cfg := wdata.asTypeOf(bcs.cfg) }
@@ -1229,14 +1232,14 @@ class CSRFile(
 
   // BCS-Extension
   if (usingBCS) {
-    val bcs_update = io.bcs_update.get
-    when (bcs_update) {
-      val bcs = reg_bcs.get
-      val cfg = bcs.cfg
-      when (cfg.en) {
+    val bcs = reg_bcs.get
+    io.bcs_addr.get.bits := bcs.addr
+    io.bcs_addr.get.valid := bcs.cfg.en
+    when (bcs.cfg.en) {
+      val wb_npc = io.wb_npc.get
+      when (wb_npc.valid) {
         when ((io.pc >= bcs.base) && (io.pc <= bcs.end)) {
-          val mem_npc = io.mem_npc.get
-          val hash = io.pc ^ mem_npc
+          val hash = io.pc ^ wb_npc.bits
           bcs.value := Cat(bcs.value(55, 0), hash(8,1))
         }
       }

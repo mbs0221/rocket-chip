@@ -770,8 +770,8 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     iobpw.action := bp.control.action
   }
   if (usingBCS) {
-    csr.io.mem_npc.get := wb_reg_npc
-    csr.io.bcs_update.get := wb_valid && (wb_ctrl.jalr)
+    csr.io.wb_npc.get.bits := wb_reg_npc
+    csr.io.wb_npc.get.valid := wb_valid && (wb_ctrl.jalr)
   }
   /** Hazard Detection
     * - ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
