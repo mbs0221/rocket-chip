@@ -242,44 +242,47 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   def all_entries = ordinary_entries ++ special_entry
   def all_real_entries = sectored_entries.flatten ++ superpage_entries ++ special_entry
 
-  // state machine
+  //** state machine **//
   val s_ready :: s_request :: s_wait :: s_wait_invalidate :: Nil = Enum(UInt(), 4)
   val state = Reg(init=s_ready)
+  //** registers **//
   val r_refill_tag = Reg(UInt(width = vpnBits))
   val r_superpage_repl_addr = Reg(UInt(log2Ceil(superpage_entries.size).W))
   val r_sectored_repl_addr = Reg(UInt(log2Ceil(sectored_entries(0).size).W))
   val r_sectored_hit_addr = Reg(UInt(log2Ceil(sectored_entries(0).size).W))
   val r_sectored_hit = Reg(Bool())
 
-  // instruction/data privilege
+  //** instruction/data privilege **//
   val priv = if (instruction) io.ptw.status.prv else io.ptw.status.dprv
   val priv_s = priv(0)
   val priv_uses_vm = priv <= PRV.S
-  // virtual memory enabled
+  //** virtual memory enabled **//
   val vm_enabled = Bool(usingVM) && io.ptw.ptbr.mode(io.ptw.ptbr.mode.getWidth-1) && priv_uses_vm && !io.req.bits.passthrough
 
   // share a single physical memory attribute checker (unshare if critical path)
   val refill_ppn = io.ptw.resp.bits.pte.ppn(ppnBits-1, 0)
   val do_refill = Bool(usingVM) && io.ptw.resp.valid
   val invalidate_refill = state.isOneOf(s_request /* don't care */, s_wait_invalidate) || io.sfence.valid
+  // MPU physical page number/physical address/priviledge
   val mpu_ppn = Mux(do_refill, refill_ppn,
                 Mux(vm_enabled && special_entry.nonEmpty, special_entry.map(e => e.ppn(vpn, e.getData(vpn))).getOrElse(0.U), io.req.bits.vaddr >> pgIdxBits))
   val mpu_physaddr = Cat(mpu_ppn, io.req.bits.vaddr(pgIdxBits-1, 0))
   val mpu_priv = Mux[UInt](Bool(usingVM) && (do_refill || io.req.bits.passthrough /* PTW */), PRV.S, Cat(io.ptw.status.debug, priv))
   
-  // PMP
+  //** PMP **//
   val pmp = Module(new PMPChecker(lgMaxSize))
   pmp.io.addr := mpu_physaddr
   pmp.io.size := io.req.bits.size
   pmp.io.pmp := (io.ptw.pmp: Seq[PMP])
   pmp.io.prv := mpu_priv
   val legal_address = edge.manager.findSafe(mpu_physaddr).reduce(_||_)
+  // fast check property
   def fastCheck(member: TLManagerParameters => Boolean) =
     legal_address && edge.manager.fastProperty(mpu_physaddr, member, (b:Boolean) => Bool(b))
   val cacheable = fastCheck(_.supportsAcquireB) && (instruction || !usingDataScratchpad)
   val homogeneous = TLBPageLookup(edge.manager.managers, xLen, p(CacheBlockBytes), BigInt(1) << pgIdxBits)(mpu_physaddr).homogeneous
   val deny_access_to_debug = mpu_priv <= PRV.M && p(DebugModuleKey).map(dmp => dmp.address.contains(mpu_physaddr)).getOrElse(false)
-  // protect
+  // protection flags
   val prot_r = fastCheck(_.supportsGet) && !deny_access_to_debug && pmp.io.r
   val prot_w = fastCheck(_.supportsPutFull) && !deny_access_to_debug && pmp.io.w
   val prot_x = fastCheck(_.executable) && !deny_access_to_debug && pmp.io.x
@@ -288,6 +291,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   val prot_aa = fastCheck(_.supportsArithmetic)
   val prot_eff = fastCheck(Seq(RegionType.PUT_EFFECTS, RegionType.GET_EFFECTS) contains _.regionType)
 
+  //** TLB sector/superpage/all_entries hits **//
   val sector_hits = sectored_entries(memIdx).map(_.sectorHit(vpn))
   val superpage_hits = superpage_entries.map(_.hit(vpn))
   val hitsVec = all_entries.map(vm_enabled && _.hit(vpn))
@@ -347,6 +351,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   // get physical page number by vpn
   val ppn = Mux1H(hitsVec :+ !vm_enabled, (all_entries zip entries).map{ case (entry, data) => entry.ppn(vpn, data) } :+ vpn(ppnBits-1, 0))
 
+  //** Protection Flags **//
   val nPhysicalEntries = 1 + special_entry.size
   // PTW access error array
   val ptw_ae_array = Cat(false.B, entries.map(_.ae).asUInt)
@@ -364,15 +369,20 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   val eff_array = Cat(Fill(nPhysicalEntries, prot_eff), normal_entries.map(_.eff).asUInt)
   // cacheable array
   val c_array = Cat(Fill(nPhysicalEntries, cacheable), normal_entries.map(_.c).asUInt)
+  // put-partial/amo-arithmetic/amo-logical array
   val ppp_array = Cat(Fill(nPhysicalEntries, prot_pp), normal_entries.map(_.ppp).asUInt)
   val paa_array = Cat(Fill(nPhysicalEntries, prot_aa), normal_entries.map(_.paa).asUInt)
   val pal_array = Cat(Fill(nPhysicalEntries, prot_al), normal_entries.map(_.pal).asUInt)
+  // put-partial/amo-arithmetic/amo-logical array if cached
   val ppp_array_if_cached = ppp_array | c_array
   val paa_array_if_cached = paa_array | Mux(usingAtomicsInCache, c_array, 0.U)
   val pal_array_if_cached = pal_array | Mux(usingAtomicsInCache, c_array, 0.U)
+  // prefetchable array
   val prefetchable_array = Cat((cacheable && homogeneous) << (nPhysicalEntries-1), normal_entries.map(_.c).asUInt)
 
+  // misaligned virtual address
   val misaligned = (io.req.bits.vaddr & (UIntToOH(io.req.bits.size) - 1)).orR
+  // bad virtual address
   val bad_va = if (!usingVM || (minPgLevels == pgLevels && vaddrBits == vaddrBitsExtended)) false.B else vm_enabled && {
     val nPgLevelChoices = pgLevels - minPgLevels + 1
     val minVAddrBits = pgIdxBits + minPgLevels * pgLevelBits
@@ -383,6 +393,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
     }).orR
   }
 
+  //** requested command **//
   val cmd_lrsc = Bool(usingAtomics) && io.req.bits.cmd.isOneOf(M_XLR, M_XSC)
   val cmd_amo_logical = Bool(usingAtomics) && isAMOLogical(io.req.bits.cmd)
   val cmd_amo_arithmetic = Bool(usingAtomics) && isAMOArithmetic(io.req.bits.cmd)
@@ -393,6 +404,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
     io.req.bits.cmd.isOneOf(M_FLUSH_ALL, M_WOK) // not a write, but needs write permissions
 
   val lrscAllowed = Mux(Bool(usingDataScratchpad || usingAtomicsOnlyForIO), 0.U, c_array)
+  //** load/store {access error, misaligned address, page fault} *//
   val ae_array =
     Mux(misaligned, eff_array, 0.U) |
     Mux(cmd_lrsc, ~lrscAllowed, 0.U)
@@ -413,9 +425,11 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   val pf_st_array = Mux(cmd_write_perms, ~(w_array | ptw_ae_array), 0.U)
   val pf_inst_array = ~(x_array | ptw_ae_array)
 
+  //** TLB hit/miss event **//
   val tlb_hit = real_hits.orR
   val tlb_miss = vm_enabled && !bad_va && !tlb_hit
 
+  //** replacement policy //
   val sectored_plru = new SetAssocLRU(cfg.nSets, sectored_entries(0).size, "plru")
   val superpage_plru = new PseudoLRU(superpage_entries.size)
   when (io.req.valid && vm_enabled) {
@@ -430,7 +444,7 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   // a miss on duplicate entries.
   val multipleHits = PopCountAtLeast(real_hits, 2)
 
-  // TLB response
+  //** TLB response to CPU **//
   io.req.ready := state === s_ready
   io.resp.pf.ld := (bad_va && cmd_read) || (pf_ld_array & hits).orR
   io.resp.pf.st := (bad_va && cmd_write_perms) || (pf_st_array & hits).orR
@@ -447,18 +461,19 @@ class TLB(instruction: Boolean, lgMaxSize: Int, cfg: TLBConfig)(implicit edge: T
   io.resp.miss := do_refill || tlb_miss || multipleHits
   io.resp.paddr := Cat(ppn, io.req.bits.vaddr(pgIdxBits-1, 0))
 
-  // PTW request
+  //** PTW request from TLB **//
   io.ptw.req.valid := state === s_request
   io.ptw.req.bits.valid := !io.kill
   io.ptw.req.bits.bits.addr := r_refill_tag
 
-  // finite state machine
+  //** State Machine **//
   if (usingVM) {
     val sfence = io.sfence.valid
     when (io.req.fire() && tlb_miss) {
       state := s_request
       r_refill_tag := vpn
 
+      // replaced address
       r_superpage_repl_addr := replacementEntry(superpage_entries, superpage_plru.way)
       r_sectored_repl_addr := replacementEntry(sectored_entries(memIdx), sectored_plru.way(memIdx))
       r_sectored_hit_addr := OHToUInt(sector_hits)

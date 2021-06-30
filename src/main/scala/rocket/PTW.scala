@@ -138,6 +138,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   val l2_refill_wire = Wire(Bool())
 
   val arb = Module(new Arbiter(Valid(new PTWReq), n))
+  // the req of each requestor 'TLBPTWIO' is connected to the input of arbiter
   arb.io.in <> io.requestor.map(_.req)
   arb.io.out.ready := (state === s_ready) && !l2_refill_wire
 
@@ -192,11 +193,13 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     choices(count)
   }
 
+  // if the output of arbiter is fired, then chosen a requestor to serve
   when (arb.io.out.fire()) {
     r_req := arb.io.out.bits.bits
     r_req_dest := arb.io.chosen
   }
 
+  //** PTE-Cache **//
   val (pte_cache_hit, pte_cache_data) = {
     val size = 1 << log2Up(pgLevels * 2)
     val plru = new PseudoLRU(size)
@@ -227,7 +230,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   assert(!(io.dpath.perf.l2hit && (io.dpath.perf.pte_miss || io.dpath.perf.pte_hit)),
     "PTE Cache Hit/Miss Performance Monitor Events are lower priority than L2TLB Hit event")
 
-  // l2-refill event
+  //** L2 Page-Table **//
   val l2_refill = RegNext(false.B)
   l2_refill_wire := l2_refill
   io.dpath.perf.l2miss := false
@@ -241,8 +244,10 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     require(isPow2(nL2TLBSets))
     val idxBits = log2Ceil(nL2TLBSets)
 
+    // replacement policy
     val l2_plru = new SetAssocLRU(nL2TLBSets, coreParams.nL2TLBWays, "plru")
 
+    // RAM, Object Model of the RAM
     val (ram, omSRAM) =  DescribedSRAM(
       name = "l2_tlb_ram",
       desc = "L2 TLB",
@@ -250,6 +255,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
       data = Vec(coreParams.nL2TLBWays, UInt(width = code.width(new L2TLBEntry(nL2TLBSets).getWidth)))
     )
 
+    // global, valid: nWays * nSets
     val g = Reg(Vec(coreParams.nL2TLBWays, UInt(width = nL2TLBSets)))
     val valid = RegInit(Vec(Seq.fill(coreParams.nL2TLBWays)(0.U(nL2TLBSets.W))))
     val (r_tag, r_idx) = Split(r_req.addr, idxBits)
@@ -315,7 +321,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   // if SFENCE occurs during walk, don't refill PTE cache or L2 TLB until next walk
   invalidated := io.dpath.sfence.valid || (invalidated && state =/= s_ready)
 
-  // memory request
+  //** Memory Request **//
   io.mem.req.valid := state === s_req || state === s_dummy1
   io.mem.req.bits.phys := Bool(true)
   io.mem.req.bits.cmd  := M_XRD
@@ -341,7 +347,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
   val pmpHomogeneous = new PMPHomogeneityChecker(io.dpath.pmp).apply(pte_addr >> pgIdxBits << pgIdxBits, count)
   val homogeneous = pmaHomogeneous && pmpHomogeneous
 
-  // response to TLB
+  //** Response to TLB **//
   for (i <- 0 until io.requestor.size) {
     io.requestor(i).resp.valid := resp_valid(i)
     io.requestor(i).resp.bits.ae := resp_ae
@@ -355,44 +361,43 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     io.requestor(i).pmp := io.dpath.pmp
   }
 
-  // control state machine
+  //** State Machine **//
   val next_state = Wire(init = state)
   state := OptimizationBarrier(next_state)
 
   switch (state) {
-    // s_ready -> [s_req, s_ready]
     is (s_ready) {
       when (arb.io.out.fire()) {
         next_state := Mux(arb.io.out.bits.valid, s_req, s_ready)
       }
       count := pgLevels - minPgLevels - io.dpath.ptbr.additionalPgLevels
     }
-    // s_req -> [s_wait1, s_req]
     is (s_req) {
       when (pte_cache_hit) {
+        // goto next level page-table
         count := count + 1
         pte_hit := true
       }.otherwise {
         next_state := Mux(io.mem.req.ready, s_wait1, s_req)
       }
     }
-    // s_wait1 -> [s_req, s_wait2]
     is (s_wait1) {
       // This Mux is for the l2_error case; the l2_hit && !l2_error case is overriden below
       next_state := Mux(l2_hit, s_req, s_wait2)
     }
-    // s_wait2 -> [s_wait3, s_ready]
     is (s_wait2) {
       next_state := s_wait3
+      //** PTE miss event **//
       io.dpath.perf.pte_miss := count < pgLevels-1
+      //** Access Error Response **//
       when (io.mem.s2_xcpt.ae.ld) {
         resp_ae := true
         next_state := s_ready
         resp_valid(r_req_dest) := true
       }
     }
-    // s_fragment_superpage -> [s_ready]
     is (s_fragment_superpage) {
+      //** SuperPage Response **//
       next_state := s_ready
       resp_valid(r_req_dest) := true
       resp_ae := false
@@ -403,13 +408,11 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     }
   }
 
-  // only the ppn is updated
   def makePTE(ppn: UInt, default: PTE) = {
     val pte = Wire(init = default)
-    pte.ppn := ppn
+    pte.ppn := ppn // only the ppn is updated
     pte
   }
-  // modify dafault pte
   r_pte := OptimizationBarrier(
     Mux(mem_resp_valid, pte,
     Mux(l2_hit && !l2_error, l2_pte,
@@ -418,7 +421,7 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     Mux(arb.io.out.fire(), makePTE(io.dpath.ptbr.ppn, r_pte),
     r_pte))))))
 
-  // [s_req | s_wait1] -> s_ready
+  //** L2-Hit Response **//
   when (l2_hit && !l2_error) {
     assert(state === s_req || state === s_wait1)
     next_state := s_ready
@@ -426,14 +429,15 @@ class PTW(n: Int)(implicit edge: TLEdgeOut, p: Parameters) extends CoreModule()(
     resp_ae := false
     count := pgLevels-1
   }
-  // s_wait3 -> [s_req | s_fragment_superpage | s_ready ]
   when (mem_resp_valid) {
     assert(state === s_wait3)
     when (traverse) {
+      //** goto next level page-table **//
       next_state := s_req
       count := count + 1
     }.otherwise {
       l2_refill := pte.v && !invalid_paddr && count === pgLevels-1
+      //** Access Error Response **//
       val ae = pte.v && invalid_paddr
       resp_ae := ae
       when (pageGranularityPMPs && count =/= pgLevels-1 && !ae) {

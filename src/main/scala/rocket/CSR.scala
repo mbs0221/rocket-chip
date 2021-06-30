@@ -36,7 +36,7 @@ class MStatus extends Bundle {
   val sum = Bool()
   val mprv = Bool()
   val xs = UInt(width = 2)
-  val fs = UInt(width = 2)     // float status
+  val fs = UInt(width = 2)     // float statusgit sta
   val mpp = UInt(width = 2)    // machine previous priviledge
   val vs = UInt(width = 2)     // vector status
   val spp = UInt(width = 1)    // supervisor previous priviledge
@@ -1201,10 +1201,10 @@ class CSRFile(
     if (usingBCS) {
       val bcs = reg_bcs.get
       when (decoded_addr(CSRs.bcs)) { bcs.value := wdata }
-      when (decoded_addr(CSRs.bcsaddr)) { bcs.addr := wdata }
       when (decoded_addr(CSRs.bcsbase)) { bcs.base := wdata }
       when (decoded_addr(CSRs.bcsend)) { bcs.end := wdata }
       when (decoded_addr(CSRs.bcscfg)) { bcs.cfg := wdata.asTypeOf(bcs.cfg) }
+      when (decoded_addr(CSRs.bcsaddr)) { bcs.addr := wdata }
     }
   }
 

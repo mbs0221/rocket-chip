@@ -1370,6 +1370,8 @@ object CSRs {
     res += bcs
     res += bcsbase
     res += bcsend
+    res += bcscfg
+    res += bcsaddr
     res.toArray
   }
   val all32 = {
