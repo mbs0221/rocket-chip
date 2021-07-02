@@ -879,6 +879,7 @@ object Causes {
   val fetch_page_fault = 0xc
   val load_page_fault = 0xd
   val store_page_fault = 0xf
+  val execution_fault = 0x10
   val all = {
     val res = collection.mutable.ArrayBuffer[Int]()
     res += misaligned_fetch
@@ -896,6 +897,7 @@ object Causes {
     res += fetch_page_fault
     res += load_page_fault
     res += store_page_fault
+    res += execution_fault
     res.toArray
   }
 }

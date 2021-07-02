@@ -253,8 +253,11 @@ class CSRFileIO(implicit p: Parameters) extends CoreBundle
     val set_vxsat = Bool().asInput
   })
 
-  val wb_npc = usingBCS.option(Valid(UInt(width = vaddrBitsExtended)).flip)
-  val bcs_addr = usingBCS.option(Valid(UInt(width = vaddrBitsExtended)))
+  val bcs = usingBCS.option(new Bundle {
+    val wb_npc = Valid(UInt(width = vaddrBitsExtended)).flip
+    val addr = Valid(UInt(width = vaddrBitsExtended))
+    val ef = Bool(OUTPUT)
+  })
 }
 
 class BCSConfig(implicit p: Parameters) extends CoreBundle {
@@ -389,6 +392,7 @@ class CSRFile(
     Causes.misaligned_load,
     Causes.misaligned_store,
     Causes.illegal_instruction,
+    Causes.execution_fault,
     Causes.user_ecall).map(1 << _).sum)
 
   //** Debug-mode **//
@@ -1233,14 +1237,16 @@ class CSRFile(
   // BCS-Extension
   if (usingBCS) {
     val bcs = reg_bcs.get
-    io.bcs_addr.get.bits := bcs.addr
-    io.bcs_addr.get.valid := bcs.cfg.en
-    when (bcs.cfg.en) {
-      val wb_npc = io.wb_npc.get
+    val io_bcs = io.bcs.get
+    io_bcs.addr.bits := bcs.addr
+    io_bcs.addr.valid := bcs.cfg.en
+    when (bcs.cfg.en) {      
+      val wb_npc = io_bcs.wb_npc
       when (wb_npc.valid) {
         when ((io.pc >= bcs.base) && (io.pc <= bcs.end)) {
           val hash = io.pc ^ wb_npc.bits
           bcs.value := Cat(bcs.value(55, 0), hash(8,1))
+          io_bcs.ef := bcs.value == 0x7050b0807050b08L
         }
       }
     }

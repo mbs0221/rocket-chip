@@ -668,6 +668,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.pf.ld, UInt(Causes.load_page_fault)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ae.st, UInt(Causes.store_access)),
     (wb_reg_valid && wb_ctrl.mem && io.dmem.s2_xcpt.ae.ld, UInt(Causes.load_access))
+    // (wb_reg_valid && wb_ctrl.jalr && csr.io.bcs.get.ef, UInt(Causes.execution_fault))
   ))
 
   val wbCoverCauses = List(
@@ -675,6 +676,7 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     (Causes.misaligned_load, "MISALIGNED_LOAD"),
     (Causes.store_access, "STORE_ACCESS"),
     (Causes.load_access, "LOAD_ACCESS")
+    // (Causes.execution_fault, "EXECUTION_FAULT")
   ) ++ (if(usingVM) List(
     (Causes.store_page_fault, "STORE_PAGE_FAULT"),
     (Causes.load_page_fault, "LOAD_PAGE_FAULT")
@@ -770,8 +772,9 @@ class Rocket(tile: RocketTile)(implicit p: Parameters) extends CoreModule()(p)
     iobpw.action := bp.control.action
   }
   if (usingBCS) {
-    csr.io.wb_npc.get.bits := wb_reg_npc
-    csr.io.wb_npc.get.valid := wb_valid && (wb_ctrl.jalr)
+    val io_bcs = csr.io.bcs.get
+    io_bcs.wb_npc.bits := wb_reg_npc
+    io_bcs.wb_npc.valid := wb_valid && (wb_ctrl.jalr)
   }
   /** Hazard Detection
     * - ID.rxs && ID.rs =/= 0 && ID.rs == {EX, MEM, WB}.rd
